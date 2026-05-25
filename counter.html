@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contador de Caixas Inteligente</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        header {
+            width: 100%;
+            text-align: center;
+            padding: 15px 0;
+            background-color: #1f1f1f;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        #counter-container {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 15px 0;
+            color: #00ffcc;
+        }
+        #canvas-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            aspect-ratio: 3/4;
+            background-color: #000;
+            overflow: hidden;
+            border-radius: 8px;
+        }
+        video, canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        #status {
+            margin-top: 10px;
+            font-style: italic;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        StyleContador de Objetos
+    </header>
+
+    <div id="counter-container">
+        Caixas detectadas: <span id="count">0</span>
+    </div>
+
+    <div id="canvas-container">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+    </div>
+
+    <div id="status">Carregando IA... Por favor, aguarde.</div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('overlay');
+        const ctx = canvas.getContext('2d');
+        const countSpan = document.getElementById('count');
+        const statusDiv = document.getElementById('status');
+
+        let model = undefined;
+
+        // Classes do COCO-SSD que se assemelham a caixas de papelão/formatos retangulares
+        // Você pode ajustar essa lista conforme os testes
+        const targetClasses = ['book', 'suitcase', 'backpack', 'box'];
+
+        // 1. Inicializar a Câmera Traseira do Smartphone
+        async function setupCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { exact: "environment" }, // Força o uso da câmera traseira
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                    audio: false
+                });
+                video.srcObject = stream;
+                return new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        resolve(video);
+                    };
+                });
+            } catch (error) {
+                console.log("Câmera traseira específica não encontrada, tentando câmera padrão...");
+                // Fallback caso esteja testando no PC (que não tem câmera "environment")
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                video.srcObject = stream;
+                return new Promise((resolve) => {
+                    video.onloadedmetadata = () => resolve(video);
+                });
+            }
+        }
+
+        // 2. Ajustar o tamanho do Canvas para o processamento gráfico
+        function adjustCanvasSize() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+        }
+
+        // 3. Loop de Detecção em Tempo Real
+        async function predictWithTimeout() {
+            // Realiza a previsão baseada no frame atual do vídeo
+            const predictions = await model.detect(video);
+            
+            // Limpa o canvas anterior
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            let boxCount = 0;
+
+            predictions.forEach(prediction => {
+                // Filtra apenas os objetos que nos interessam e com boa confiança (acima de 55%)
+                if (targetClasses.includes(prediction.class) && prediction.score > 0.55) {
+                    boxCount++;
+
+                    // Desenha o retângulo ao redor do objeto
+                    ctx.strokeStyle = '#00ffcc';
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(prediction.bbox[0], prediction.bbox[1], prediction.bbox[2], prediction.bbox[3]);
+
+                    // Desenha o rótulo de texto (opcional, bom para debugar o que a IA está vendo)
+                    ctx.fillStyle = '#00ffcc';
+                    ctx.font = '16px Arial';
+                    ctx.fillText(
+                        `Caixa (${Math.round(prediction.score * 100)}%)`, 
+                        prediction.bbox[0], 
+                        prediction.bbox[1] > 20 ? prediction.bbox[1] - 5 : 10
+                    );
+                }
+            });
+
+            // Atualiza o contador na tela
+            countSpan.innerText = boxCount;
+
+            // Chama o próximo frame
+            requestAnimationFrame(predictWithTimeout);
+        }
+
+        // 4. Inicialização Principal
+        async function main() {
+            statusDiv.innerText = "Acessando a câmera...";
+            await setupCamera();
+            
+            statusDiv.innerText = "Carregando modelo de IA (COCO-SSD)...";
+            model = await cocoSsd.load();
+            
+            adjustCanvasSize();
+            statusDiv.innerText = "Aplicativo Pronto!";
+            
+            // Oculta o texto de status após o sucesso
+            setTimeout(() => statusDiv.style.display = 'none', 2000);
+
+            // Inicia a detecção contínua
+            predictWithTimeout();
+        }
+
+        // Inicia o app assim que a página carregar
+        window.onload = main;
+    </script>
+</body>
+</html>
